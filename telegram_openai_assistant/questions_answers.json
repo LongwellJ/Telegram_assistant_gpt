@@ -1,0 +1,79 @@
+[
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "hello",
+        "answer": "Sorry, I encountered an issue while processing your request.",
+        "timestamp": "2024-10-18 13:12:43.214134"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "Hello, what is your purpose",
+        "answer": "I am a virtual assistant designed to guide vitreoretinal surgeons regarding pneumatic retinopexy (PNR). I provide detailed and specific explanations based on the data sources you have uploaded, such as lecture transcripts, chat message history, and articles related to this technique. My goal is to assist you with information and guidance on PNR, prioritizing the most relevant and authoritative sources. If you have any questions about PNR, feel free to ask!",
+        "timestamp": "2024-10-18 13:16:56.982095"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "What is your purpose?",
+        "answer": "I am a virtual assistant designed to guide vitreoretinal surgeons regarding pneumatic retinopexy (PNR). My purpose is to provide detailed and specific explanations based on the provided data sources, which include lecture transcripts, chat message history, and articles related to this technique and its case management.",
+        "timestamp": "2024-10-18 13:34:26.191898"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "What is PnR?",
+        "answer": "Sorry, there was an issue processing your request. Please try again later.",
+        "timestamp": "2024-10-18 13:37:51.426527"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "What is PnR?",
+        "answer": "Pneumatic retinopexy (PnR) is a minimally invasive surgical procedure used to repair certain types of rhegmatogenous retinal detachments (RRD). It was first described over 30 years ago as a two-step outpatient operation without the need for a conjunctival incision. The procedure involves the application of retinopexy (either cryotherapy or laser) to the retinal break before or after the injection of an expansile gas into the vitreous cavity of the eye. This gas bubble helps to reattach the retina by pushing it back against the wall of the eye\u30104:2\u2020source\u3011.",
+        "timestamp": "2024-10-18 13:41:40.065727"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "What is your purpose?",
+        "answer": "I am a virtual assistant designed to guide vitreoretinal surgeons regarding pneumatic retinopexy (PNR). My role is to provide detailed and specific explanations based on the lecture transcripts, chat message history, and articles in my knowledge base that describe this technique and discuss specific examples and case management. I prioritize information from specific files in a given order to ensure the most accurate and relevant guidance. If you have any questions about pneumatic retinopexy or related topics, feel free to ask!",
+        "timestamp": "2024-10-18 13:42:21.538947"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "Tell me about age related macular degenration",
+        "answer": "The topic of age-related macular degeneration (AMD) is outside the scope of the documents provided in your files, which focus on pneumatic retinopexy. Therefore, I'm unable to provide information on AMD from the current data sources. If you have any questions specifically related to pneumatic retinopexy or related vitreoretinal surgical procedures, I would be happy to assist with those.",
+        "timestamp": "2024-10-18 13:44:08.924959"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "What was my previous question about?",
+        "answer": "You haven't asked a question yet in this session. Please go ahead and ask your question, and I'll do my best to assist you!",
+        "timestamp": "2024-10-18 13:46:46.617698"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "What is PnR?",
+        "answer": "Pneumatic retinopexy (PnR) is a procedure used to repair certain types of retinal detachments. It involves injecting a gas bubble into the vitreous cavity of the eye to push the detached retina back into place. This technique is less invasive compared to other methods like vitrectomy and scleral buckling, and it can be performed in an office setting\u30104:1\u2020source\u3011.",
+        "timestamp": "2024-10-18 13:54:05.016957"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "What is PnR?",
+        "answer": "Pneumatic retinopexy (PnR) is a surgical technique used for the repair of rhegmatogenous retinal detachments (RRD). It was first described over 30 years ago as a two-step outpatient operation that does not require a conjunctival incision. The procedure involves the application of retinopexy (either cryotherapy or laser) to the retinal break before or after the injection of an expansile gas into the vitreous cavity. This method helps to reattach the retina by pushing it back against the wall of the eye\u30104:2\u2020source\u3011.",
+        "timestamp": "2024-10-18 13:57:32.601978"
+    },
+    {
+        "telegram_id": 6514368068,
+        "username": null,
+        "question": "@PnRGPTbot what is your purpose?",
+        "answer": "I am a virtual assistant designed to guide vitreoretinal surgeons regarding pneumatic retinopexy (PNR). My role is to provide detailed and specific explanations based on a set of documents that include lecture transcripts, chat message history, and articles related to this technique. I prioritize information from these documents to answer questions about PNR, its procedures, case management, and related topics.",
+        "timestamp": "2024-10-18 14:21:17.987841"
+    }
+]
