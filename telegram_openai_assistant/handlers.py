@@ -8,7 +8,7 @@ import asyncio
 from .config import assistant_id, client_api_key
 from .utils import get_message_count, update_message_count, save_qa
 import logging
-
+import re
 client = OpenAI(api_key=client_api_key)
 
 
@@ -18,6 +18,15 @@ client = OpenAI(api_key=client_api_key)
 #         chat_id=update.effective_chat.id, text="Hello! Ask me anything."
 #     )
 
+def clean_response(response_text):
+    """
+    Removes any text enclosed within 【】 characters from the given string.
+    """
+    # Regular expression to match text inside 【 】 brackets
+    cleaned_text = re.sub(r'【.*?】', '', response_text)
+    
+    # Optionally, strip any extra whitespace that may be left after removing the brackets
+    return cleaned_text.strip()
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     """Sends a help message to the user."""
@@ -25,7 +34,6 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         chat_id=update.effective_chat.id,
         text="Just send me a question and I'll try to answer it.",
     )
-
 
 # def get_answer(message_str) -> None:
 #     """Get answer from assistant"""
@@ -110,29 +118,47 @@ def get_answer(message_str):
         logging.error(f"Error while getting the answer: {e}")
         return "Sorry, I encountered an issue while processing your request."
 
+async def handle_mention(message_text, chat_id, context: CallbackContext):
+    """Handles the logic for when the bot is mentioned or called via /chat."""
+    # bot_username = f"@{context.bot.username}"  # Get bot username dynamically
+    logging.info(f"Received message: {message_text}")
 
+    # Check if the bot is mentioned anywhere in the message
+    if "/chat" in message_text:
+        # Extract the user's message by removing the bot's mention
+        user_message = message_text.replace("/chat", "").strip()
+        
+        if user_message:
+            response = get_answer(user_message)  # Call your OpenAI function
+            cleaned_response = clean_response(response)
+            await context.bot.send_message(chat_id=chat_id, text=cleaned_response)
+        else:
+            await context.bot.send_message(chat_id=chat_id, text="Hello! How can I assist you?")
+    else:
+        logging.info(f"Ignored message: {message_text}")
+
+async def chat_command(update: Update, context: CallbackContext) -> None:
+    """Command handler for /chat. It passes the message to the mention handler."""
+    # user_message = update.message.text.replace("/chat", "").strip()
+    user_message = update.message.text.strip()
+    # Add @PnRGPTbot to the message to simulate a mention
+    if user_message:
+        # fake_message = f"@{context.bot.username} {user_message}"
+        await handle_mention(user_message, update.effective_chat.id, context)
+    else:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please provide a message after the /chat command."
+        )
+        
 async def process_group_message(update: Update, context: CallbackContext):
     """Processes a message in a group chat and responds if the bot is mentioned."""
     message_text = update.message.text
-    bot_username = context.bot.username
-
-    # Check if the bot is mentioned in the message
-    if f"@{bot_username}" in message_text:
-        # Remove the bot mention from the message
-        user_message = message_text.replace(f"@{bot_username}", "").strip()
-
-        if user_message:
-            response = f"You mentioned me! You asked: {user_message}"
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=response)
-        else:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello! How can I assist you?")
-    else:
-        # Optionally ignore messages that don't mention the bot
-        logging.info(f"Ignored message in group chat: {message_text}")
+    await handle_mention(message_text, update.effective_chat.id, context)
 
 async def start(update: Update, context: CallbackContext):
     """Handles /start command in both private and group chats."""
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello! I'm here to help. Mention me in a group using @YourBotName.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello! I'm here to help. Mention me in a group using @PnRGPTbot.")
 
 async def process_message(update: Update, context: CallbackContext) -> None:
     """Processes a message from the user, gets an answer, and sends it back."""
