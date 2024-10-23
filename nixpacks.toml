@@ -1,4 +1,8 @@
-[phases]
-install = "pip install -r requirements.txt"
-build = "echo 'Build Complete'"
-start = "python -m telegram_openai_assistant.bot"
+[phases.install]
+cmd = "pip install -r requirements.txt"
+
+[phases.build]
+cmd = "echo 'Build Complete'"
+
+[phases.start]
+cmd = "python -m telegram_openai_assistant.bot"
