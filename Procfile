@@ -1,0 +1,1 @@
+web: python -m telegram_openai_assistant.bot
