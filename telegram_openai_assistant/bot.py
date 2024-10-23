@@ -15,6 +15,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Log the error and send a message to notify the user."""
     logging.error(f"Error: {context.error}")  # Log error to console
     await update.message.reply_text("Oops! Something went wrong. Please try again later.")
+
 def setup_handlers(app):
     """Sets up the command and message handlers for the bot."""
     
@@ -28,7 +29,6 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("chat", chat_command))  # Add the new /chat command
-
 
     
 def main():
