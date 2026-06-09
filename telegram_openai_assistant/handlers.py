@@ -138,7 +138,6 @@ async def start(update: Update, context: CallbackContext):
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello! I'm here to help. Mention me in a group using @PnRGPTbot.")
 
 async def process_message(update: Update, context: CallbackContext) -> None:
-    """Processes a message from the user, gets an answer, and sends it back."""
     message_data = get_message_count()
     count = message_data["count"]
     date = message_data["date"]
@@ -146,6 +145,7 @@ async def process_message(update: Update, context: CallbackContext) -> None:
 
     if date != today:
         count = 0
+
     if count >= 100:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -153,11 +153,18 @@ async def process_message(update: Update, context: CallbackContext) -> None:
         )
         return
 
-    # Call `get_answer` synchronously
-    answer = get_answer(update.message.text)
-    
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=answer)
+    answer = get_answer(
+        update.effective_chat.id,
+        update.message.text
+    )
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=answer
+    )
+
     update_message_count(count + 1)
+
     save_qa(
         update.effective_user.id,
         update.effective_user.username,
