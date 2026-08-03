@@ -7,7 +7,8 @@ This repository provides a general framework for integrating an OpenAI model (vi
 ## Features
 
 - Real-time response to user queries, grounded via `file_search` over an OpenAI vector store.
-- Per-chat conversation continuity (via the Responses API's `previous_response_id` chaining), persisted in SQLite so it survives restarts.
+- Per-user conversation continuity, persisted in SQLite so it survives restarts. Each person gets their own thread even inside a shared group chat, so multiple people asking unrelated questions don't confuse each other's context.
+- Conversations don't grow unbounded: once a thread's estimated size passes a token budget, the oldest messages are trimmed off (first-in-first-out) while recent context is kept, rather than losing the whole conversation at once. A thread only resets completely after a long stretch of inactivity or an unusually high number of turns.
 - Replies are rendered as formatted Telegram messages (bold, italics, links, lists, blockquotes) instead of raw markdown, and are automatically split across multiple messages if they exceed Telegram's 4096-character limit.
 - A "typing…" indicator is shown for the full duration of a request, not just the first few seconds.
 - Daily message count tracking.
@@ -53,7 +54,7 @@ OPENAI_VECTOR_STORE_ID=your-vector-store-id
 SQLITE_DB_PATH=./bot_state.db
 ```
 
-`SQLITE_DB_PATH` is where per-chat conversation state (chat_id -> last response id) is persisted. Locally this can stay as a relative path; in production it must point at durable storage (see Deployment below), otherwise conversation memory is lost on every restart.
+`SQLITE_DB_PATH` is where per-user conversation history is persisted. Locally this can stay as a relative path; in production it must point at durable storage (see Deployment below), otherwise conversation memory is lost on every restart.
 
 The model, temperature, and system instructions used to ground the assistant live in code at `telegram_openai_assistant/assistant_config.py` rather than in `.env`, since they're multi-paragraph and belong in version control.
 

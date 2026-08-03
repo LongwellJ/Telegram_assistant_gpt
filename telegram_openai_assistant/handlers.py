@@ -20,6 +20,23 @@ MARKDOWN_SPLIT_LIMIT = 3000
 # so it has to be re-sent periodically to stay visible for the duration of a slower call.
 TYPING_REFRESH_SECONDS = 4
 
+# We resend the *entire* conversation history as input on every turn (that's how
+# continuity works here -- see storage.py), so a thread gets more expensive and slower
+# with every message, and can eventually exceed the model's context window outright.
+# MAX_CONVERSATION_TURNS/CONVERSATION_TIMEOUT_SECONDS retire a thread entirely (rare --
+# genuinely stale or runaway conversations). MAX_CONTEXT_TOKENS instead trims the oldest
+# turns FIFO to stay under budget, so a long-running conversation keeps recent context
+# instead of losing everything at once.
+MAX_CONVERSATION_TURNS = 40
+CONVERSATION_TIMEOUT_SECONDS = 6 * 60 * 60  # 6h of inactivity is treated as a new topic
+MAX_CONTEXT_TOKENS = 400_000
+# No tokenizer dependency: file_search's retrieved-document tokens are invisible to us
+# until after the call anyway and dominate the real total, so a precise local count of
+# just the conversational text wouldn't meaningfully improve this estimate.
+CHARS_PER_TOKEN_ESTIMATE = 4
+
+RESET_NOTICE = "\U0001F504 This conversation has grown long, so I'm starting a fresh one from here."
+
 
 def _split_message(text: str, limit: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> list[str]:
     """Splits text into chunks that fit within Telegram's per-message character limit,
@@ -66,21 +83,81 @@ async def help_command(update: Update, context: CallbackContext) -> None:
     )
 
 
-async def get_reply(chat_id, message_text):
-    """Get a reply from the model, chaining conversation state via the Responses API's
-    previous_response_id and persisting it so continuity survives restarts."""
-    previous_response_id = await asyncio.to_thread(storage.get_last_response_id, chat_id)
-    result = await openai_client.get_answer(previous_response_id, message_text)
+def _conversation_key(chat_id, user_id) -> str:
+    """Scopes each conversation thread to a (chat, user) pair rather than just chat_id,
+    so multiple people in the same group each get their own context instead of sharing
+    -- and confusing -- one another's."""
+    return f"{chat_id}:{user_id}"
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // CHARS_PER_TOKEN_ESTIMATE)
+
+
+def _trim_to_token_budget(history: list[dict], budget: int = MAX_CONTEXT_TOKENS) -> list[dict]:
+    """Evicts the oldest turns (FIFO) until the estimated size of the remaining history
+    fits the budget, instead of wiping the whole conversation once it's exceeded.
+    Prefers dropping a whole user/assistant pair at a time to keep turns aligned."""
+    def total_tokens() -> int:
+        return sum(_estimate_tokens(m["content"]) for m in history)
+
+    while total_tokens() > budget and len(history) > 2:
+        del history[0:2]
+    # Fallback for a single turn so large it alone is near/over budget: still keep the
+    # newest entry so the conversation isn't left completely empty.
+    while total_tokens() > budget and len(history) > 1:
+        history.pop(0)
+    return history
+
+
+def _resolve_history(state: dict | None) -> tuple[list[dict], str | None]:
+    """Decides whether to continue an existing thread or start a new one, based on turn
+    count and inactivity (the token budget is handled separately via FIFO trimming, not
+    a full reset). Returns (history, reset_reason); reset_reason is None when continuing
+    normally, otherwise a short human-readable reason for logging/notice."""
+    if state is None:
+        return [], None
+
+    if len(state["history"]) // 2 >= MAX_CONVERSATION_TURNS:
+        return [], "turn limit reached"
+
+    updated_at = datetime.datetime.fromisoformat(state["updated_at"])
+    age_seconds = (datetime.datetime.now(datetime.timezone.utc) - updated_at).total_seconds()
+    if age_seconds >= CONVERSATION_TIMEOUT_SECONDS:
+        return [], "inactive too long"
+
+    return state["history"], None
+
+
+async def get_reply(context: CallbackContext, chat_id, user_id, message_text):
+    """Get a reply from the model, continuing the caller's existing conversation history
+    when it's still valid, and persisting the updated history so continuity survives
+    restarts. History is trimmed FIFO to a token budget rather than sending an
+    ever-growing conversation to the model."""
+    key = _conversation_key(chat_id, user_id)
+    state = await asyncio.to_thread(storage.get_conversation_state, key)
+    history, reset_reason = _resolve_history(state)
+
+    if reset_reason is not None:
+        logging.info(f"Resetting conversation {key}: {reset_reason}")
+        await context.bot.send_message(chat_id=chat_id, text=RESET_NOTICE)
+
+    history.append({"role": "user", "content": message_text})
+    history = _trim_to_token_budget(history)
+
+    result = await openai_client.get_answer(history)
 
     if result.response_id is not None:
-        await asyncio.to_thread(storage.set_last_response_id, chat_id, result.response_id)
+        history.append({"role": "assistant", "content": result.text})
+        history = _trim_to_token_budget(history)
+        await asyncio.to_thread(storage.save_history, key, history)
     else:
-        logging.error(f"No response_id returned for chat_id {chat_id}; conversation state not updated")
+        logging.error(f"No response returned for conversation {key}; state not updated")
 
     return result.text
 
 
-async def _get_reply_with_typing(context: CallbackContext, chat_id, message_text: str) -> str:
+async def _get_reply_with_typing(context: CallbackContext, chat_id, user_id, message_text: str) -> str:
     """Same as get_reply, but shows Telegram's "typing…" indicator for as long as the
     request is in flight, re-sending it every few seconds since it expires on its own."""
     async def _keep_typing():
@@ -93,14 +170,17 @@ async def _get_reply_with_typing(context: CallbackContext, chat_id, message_text
 
     typing_task = asyncio.create_task(_keep_typing())
     try:
-        return await get_reply(chat_id, message_text)
+        return await get_reply(context, chat_id, user_id, message_text)
     finally:
         typing_task.cancel()
         await asyncio.gather(typing_task, return_exceptions=True)
 
 
-async def handle_mention(message_text, chat_id, context: CallbackContext):
+async def handle_mention(update: Update, context: CallbackContext):
     """Handles the logic for when the bot is mentioned or called via /chat."""
+    message_text = update.message.text
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     logging.info(f"Received message: {message_text}")
 
     if "/chat" in message_text:
@@ -108,7 +188,7 @@ async def handle_mention(message_text, chat_id, context: CallbackContext):
         user_message = message_text.replace("/chat", "").strip()
 
         if user_message:
-            response = await _get_reply_with_typing(context, chat_id, user_message)
+            response = await _get_reply_with_typing(context, chat_id, user_id, user_message)
             await _send_long_message(context, chat_id, response)
         else:
             await context.bot.send_message(chat_id=chat_id, text="Hello! How can I assist you?")
@@ -118,9 +198,8 @@ async def handle_mention(message_text, chat_id, context: CallbackContext):
 
 async def chat_command(update: Update, context: CallbackContext) -> None:
     """Command handler for /chat. It passes the message to the mention handler."""
-    user_message = update.message.text.strip()
-    if user_message:
-        await handle_mention(user_message, update.effective_chat.id, context)
+    if update.message.text.strip():
+        await handle_mention(update, context)
     else:
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -130,8 +209,7 @@ async def chat_command(update: Update, context: CallbackContext) -> None:
 
 async def process_group_message(update: Update, context: CallbackContext):
     """Processes a message in a group chat and responds if the bot is mentioned."""
-    message_text = update.message.text
-    await handle_mention(message_text, update.effective_chat.id, context)
+    await handle_mention(update, context)
 
 
 async def start(update: Update, context: CallbackContext):
@@ -158,6 +236,7 @@ async def process_message(update: Update, context: CallbackContext) -> None:
     answer = await _get_reply_with_typing(
         context,
         update.effective_chat.id,
+        update.effective_user.id,
         update.message.text
     )
 

@@ -18,6 +18,7 @@ _CITATION_MARKER_RE = re.compile(r"【.*?】")
 class ResponseResult:
     text: str
     response_id: str | None
+    total_tokens: int | None = None
 
 
 def _clean(text: str) -> str:
@@ -25,16 +26,17 @@ def _clean(text: str) -> str:
     return _CITATION_MARKER_RE.sub("", text).strip()
 
 
-async def get_answer(previous_response_id: str | None, message_str: str) -> ResponseResult:
-    """Get an answer from the model, chaining conversation state via previous_response_id.
-    response_id is None on failure so callers know not to persist it."""
+async def get_answer(messages: list[dict[str, str]]) -> ResponseResult:
+    """Get an answer from the model, given the full conversation so far as a list of
+    {"role": "user"|"assistant", "content": ...} turns (handlers.py owns trimming this
+    to a token budget). response_id is None on failure so callers know not to persist
+    the turn that triggered it."""
     try:
         response = await client.responses.create(
             model=MODEL,
             instructions=INSTRUCTIONS,
-            input=message_str,
+            input=messages,
             tools=[{"type": "file_search", "vector_store_ids": [vector_store_id]}],
-            previous_response_id=previous_response_id,
             temperature=TEMPERATURE,
         )
     except APITimeoutError:
@@ -50,4 +52,5 @@ async def get_answer(previous_response_id: str | None, message_str: str) -> Resp
         logger.error(f"OpenAI API error: {e}")
         return ResponseResult("Sorry, there was an issue processing your request. Please try again later.", None)
 
-    return ResponseResult(_clean(response.output_text), response.id)
+    total_tokens = response.usage.total_tokens if response.usage is not None else None
+    return ResponseResult(_clean(response.output_text), response.id, total_tokens)
