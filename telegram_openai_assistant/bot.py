@@ -1,13 +1,16 @@
 # bot.py
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from .config import telegram_token
+from .config import telegram_token, validate_config
 from .handlers import start, help_command, process_message, process_group_message, chat_command
+from . import storage
 import logging
 from telegram import Update
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+validate_config()
 
 application = Application.builder().token(telegram_token).build()
 
@@ -34,6 +37,7 @@ def setup_handlers(app):
 def main():
     """Main function to run the bot."""
     logger.info("Starting bot...")
+    storage.init_db()
     setup_handlers(application)
     application.add_error_handler(error_handler)
     application.run_polling()

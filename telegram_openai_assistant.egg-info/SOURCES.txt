@@ -2,11 +2,13 @@ LICENSE
 README.md
 setup.py
 telegram_openai_assistant/__init__.py
+telegram_openai_assistant/assistant_config.py
 telegram_openai_assistant/bot.py
 telegram_openai_assistant/config.py
 telegram_openai_assistant/handlers.py
+telegram_openai_assistant/openai_client.py
 telegram_openai_assistant/storage.py
-telegram_openai_assistant/test.py
+telegram_openai_assistant/telegram_markdown.py
 telegram_openai_assistant/utils.py
 telegram_openai_assistant.egg-info/PKG-INFO
 telegram_openai_assistant.egg-info/SOURCES.txt

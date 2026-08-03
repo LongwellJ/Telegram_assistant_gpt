@@ -3,10 +3,15 @@ from pathlib import Path
 import datetime
 from filelock import FileLock
 
-# Paths to the files
-message_count_file = Path("message_count.json")
-qa_file = Path("questions_answers.json")
-lock_file = Path("file.lock")  # Lock file for safe file operations
+from .config import data_dir
+
+# Paths to the files, anchored under DATA_DIR so root-vs-package CWD drift can't happen
+# and, on Railway, this can point into the mounted volume to survive redeploys.
+_data_dir = Path(data_dir)
+_data_dir.mkdir(parents=True, exist_ok=True)
+message_count_file = _data_dir / "message_count.json"
+qa_file = _data_dir / "questions_answers.json"
+lock_file = _data_dir / "file.lock"  # Lock file for safe file operations
 
 def get_message_count():
     """Retrieve the current message count."""

@@ -5,10 +5,12 @@ setup(
     version='0.1',
     packages=find_packages(),
     install_requires=[
-        'python-telegram-bot==21.6',  # Make sure to specify the correct versions
-        'openai==1.52.0',
+        'python-telegram-bot==21.6',
+        'openai==2.52.0',
         'python-dotenv==1.0.1',
-        # Add other dependencies here
+        'filelock==3.13.1',
+        'httpx==0.27.2',
+        'markdown-it-py==3.0.0',
     ],
     entry_points={
         'console_scripts': [

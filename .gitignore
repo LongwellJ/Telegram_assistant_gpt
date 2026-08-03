@@ -3,3 +3,7 @@ __pycache__
 .env
 .env.swp
 .venv
+message_count.json
+questions_answers.json
+bot_state.db
+*.egg-info/

@@ -1,46 +1,62 @@
-#bot.py
-from collections import defaultdict
-import time
+import asyncio
 import datetime
+import logging
+
+from telegram.constants import ChatAction, ParseMode
+from telegram.error import BadRequest
 from telegram.ext import CallbackContext
 from telegram import Update
-from openai import OpenAI
-import asyncio
-from .config import assistant_id, client_api_key
+
+from . import openai_client, storage
+from .telegram_markdown import to_telegram_html
 from .utils import get_message_count, update_message_count, save_qa
-import logging
-import re
+
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+# Conservative: we split the raw markdown at this length, then convert each piece to
+# HTML, which grows it somewhat (**x** -> <b>x</b>). Leaves headroom under the real
+# 4096-char Telegram limit for that markup overhead.
+MARKDOWN_SPLIT_LIMIT = 3000
+# Telegram's "typing…" indicator auto-expires after ~5s (or on the next sent message),
+# so it has to be re-sent periodically to stay visible for the duration of a slower call.
+TYPING_REFRESH_SECONDS = 4
 
 
-client = OpenAI(api_key=client_api_key)
-thread_ids = defaultdict(lambda: None)
+def _split_message(text: str, limit: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> list[str]:
+    """Splits text into chunks that fit within Telegram's per-message character limit,
+    preferring to break on a paragraph/line/word boundary over mid-word."""
+    if len(text) <= limit:
+        return [text]
+
+    chunks = []
+    remaining = text
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\n\n", 0, limit)
+        if split_at == -1:
+            split_at = remaining.rfind("\n", 0, limit)
+        if split_at == -1:
+            split_at = remaining.rfind(" ", 0, limit)
+        if split_at <= 0:
+            split_at = limit
+        chunks.append(remaining[:split_at].rstrip())
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
+async def _send_long_message(context: CallbackContext, chat_id, text: str) -> None:
+    """Sends text as one or more messages (splitting if it exceeds Telegram's 4096-char
+    limit), rendering the model's Markdown as Telegram HTML so bold/italic/links/lists
+    actually show up formatted. Falls back to plain text if HTML parsing ever fails,
+    e.g. from an edge case the converter didn't anticipate, so a reply is never lost."""
+    for chunk in _split_message(text, limit=MARKDOWN_SPLIT_LIMIT):
+        html_chunk = to_telegram_html(chunk)
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=html_chunk, parse_mode=ParseMode.HTML)
+        except BadRequest as e:
+            logging.error(f"Telegram rejected HTML message, falling back to plain text: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=chunk)
 
-def clean_response(response_text):
-    """
-    Removes any text enclosed within 【】 characters from the given string.
-    """
-    # Regular expression to match text inside 【 】 brackets
-    cleaned_text = re.sub(r'【.*?】', '', response_text)
-    
-    # Optionally, strip any extra whitespace that may be left after removing the brackets
-    return cleaned_text.strip()
-
-def get_or_create_thread(chat_id):
-    """Retrieves the existing thread_id or creates a new one."""
-    thread_id = thread_ids[chat_id]
-    
-    if thread_id is None:
-        # Create a new thread if no existing thread_id
-        thread = client.beta.threads.create()
-        thread_id = thread.id
-        thread_ids[chat_id] = thread_id
-        logging.info(f"Created new thread for chat_id {chat_id}: {thread_id}")
-    else:
-        logging.info(f"Using existing thread for chat_id {chat_id}: {thread_id}")
-
-    return thread_id
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     """Sends a help message to the user."""
@@ -49,57 +65,39 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         text="Just send me a question and I'll try to answer it.",
     )
 
-def get_answer(chat_id, message_str):
-    """Get answer from assistant within a thread, handling errors and retries."""
+
+async def get_reply(chat_id, message_text):
+    """Get a reply from the model, chaining conversation state via the Responses API's
+    previous_response_id and persisting it so continuity survives restarts."""
+    previous_response_id = await asyncio.to_thread(storage.get_last_response_id, chat_id)
+    result = await openai_client.get_answer(previous_response_id, message_text)
+
+    if result.response_id is not None:
+        await asyncio.to_thread(storage.set_last_response_id, chat_id, result.response_id)
+    else:
+        logging.error(f"No response_id returned for chat_id {chat_id}; conversation state not updated")
+
+    return result.text
+
+
+async def _get_reply_with_typing(context: CallbackContext, chat_id, message_text: str) -> str:
+    """Same as get_reply, but shows Telegram's "typing…" indicator for as long as the
+    request is in flight, re-sending it every few seconds since it expires on its own."""
+    async def _keep_typing():
+        try:
+            while True:
+                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                await asyncio.sleep(TYPING_REFRESH_SECONDS)
+        except asyncio.CancelledError:
+            pass
+
+    typing_task = asyncio.create_task(_keep_typing())
     try:
-        # Get or create the thread for the given chat_id
-        thread_id = get_or_create_thread(chat_id)
+        return await get_reply(chat_id, message_text)
+    finally:
+        typing_task.cancel()
+        await asyncio.gather(typing_task, return_exceptions=True)
 
-        # Send the user's message to the thread
-        client.beta.threads.messages.create(
-            thread_id=thread_id, role="user", content=message_str
-        )
-
-        # Start a new run for the assistant to process the message
-        run = client.beta.threads.runs.create(
-            thread_id=thread_id,
-            assistant_id=assistant_id,
-        )
-
-        # Poll the API until the assistant has completed processing
-        max_retries = 10
-        retry_interval = 3
-        retries = 0
-
-        while retries < max_retries:
-            run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
-            logging.info(f"Run status: {run.status}")
-            logging.info(f"Full response data: {run}")
-            
-            if run.status == "completed":
-                break
-            elif run.status == "failed":
-                logging.error(f"Run failed: {run}")
-                return "Sorry, there was an issue processing your request. Please try again later."
-            
-            time.sleep(retry_interval)
-            retries += 1
-
-        if retries >= max_retries:
-            logging.error("The request timed out after multiple retries.")
-            return "Sorry, the request is taking too long. Please try again later."
-
-        # Get the list of messages from the thread once the run is completed
-        messages = client.beta.threads.messages.list(thread_id=thread_id)
-        logging.info(f"Full messages data: {messages}")
-
-        # Extract the assistant's response
-        response = messages.model_dump()["data"][0]["content"][0]["text"]["value"]
-        return clean_response(response)
-
-    except Exception as e:
-        logging.error(f"Error while getting the answer: {e}")
-        return "Sorry, I encountered an issue while processing your request."
 
 async def handle_mention(message_text, chat_id, context: CallbackContext):
     """Handles the logic for when the bot is mentioned or called via /chat."""
@@ -108,14 +106,15 @@ async def handle_mention(message_text, chat_id, context: CallbackContext):
     if "/chat" in message_text:
         # Extract the user's message
         user_message = message_text.replace("/chat", "").strip()
-        
+
         if user_message:
-            response = get_answer(chat_id, user_message)  # Call your OpenAI function
-            await context.bot.send_message(chat_id=chat_id, text=response)
+            response = await _get_reply_with_typing(context, chat_id, user_message)
+            await _send_long_message(context, chat_id, response)
         else:
             await context.bot.send_message(chat_id=chat_id, text="Hello! How can I assist you?")
     else:
         logging.info(f"Ignored message: {message_text}")
+
 
 async def chat_command(update: Update, context: CallbackContext) -> None:
     """Command handler for /chat. It passes the message to the mention handler."""
@@ -127,18 +126,21 @@ async def chat_command(update: Update, context: CallbackContext) -> None:
             chat_id=update.effective_chat.id,
             text="Please provide a message after the /chat command."
         )
-        
+
+
 async def process_group_message(update: Update, context: CallbackContext):
     """Processes a message in a group chat and responds if the bot is mentioned."""
     message_text = update.message.text
     await handle_mention(message_text, update.effective_chat.id, context)
 
+
 async def start(update: Update, context: CallbackContext):
     """Handles /start command in both private and group chats."""
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello! I'm here to help. Mention me in a group using @PnRGPTbot.")
 
+
 async def process_message(update: Update, context: CallbackContext) -> None:
-    message_data = get_message_count()
+    message_data = await asyncio.to_thread(get_message_count)
     count = message_data["count"]
     date = message_data["date"]
     today = str(datetime.date.today())
@@ -153,19 +155,18 @@ async def process_message(update: Update, context: CallbackContext) -> None:
         )
         return
 
-    answer = get_answer(
+    answer = await _get_reply_with_typing(
+        context,
         update.effective_chat.id,
         update.message.text
     )
 
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=answer
-    )
+    await _send_long_message(context, update.effective_chat.id, answer)
 
-    update_message_count(count + 1)
+    await asyncio.to_thread(update_message_count, count + 1)
 
-    save_qa(
+    await asyncio.to_thread(
+        save_qa,
         update.effective_user.id,
         update.effective_user.username,
         update.message.text,
